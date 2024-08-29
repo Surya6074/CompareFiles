@@ -1,1 +1,254 @@
-https://chatgpt.com/share/79733965-404e-4039-867e-32beebb69f30
+// extension.js
+const vscode = require('vscode');
+const DiffMatchPatch = require('diff-match-patch');
+
+// Activate the extension
+function activate(context) {
+  let disposable = vscode.commands.registerCommand('extension.compareFiles', async () => {
+    // Prompt the user to select two files
+    const oldFileUri = await vscode.window.showOpenDialog({ canSelectMany: false });
+    const newFileUri = await vscode.window.showOpenDialog({ canSelectMany: false });
+
+    if (!oldFileUri || !newFileUri) {
+      vscode.window.showErrorMessage('Please select both old and new files.');
+      return;
+    }
+
+    const oldFile = oldFileUri[0];
+    const newFile = newFileUri[0];
+
+    // Read file content
+    const oldContent = (await vscode.workspace.fs.readFile(oldFile)).toString();
+    const newContent = (await vscode.workspace.fs.readFile(newFile)).toString();
+
+    // Highlight differences and display the results
+    highlightDifferences(oldContent, newContent, oldFile.fsPath);
+  });
+
+  context.subscriptions.push(disposable);
+}
+
+// Function to highlight differences and add buttons
+function highlightDifferences(oldContent, newContent, oldFilePath) {
+  const dmp = new DiffMatchPatch();
+  const diffs = dmp.diff_main(oldContent, newContent);
+
+  dmp.diff_cleanupSemantic(diffs);
+
+  const diffContent = diffs
+    .map((diff) => {
+      const [op, text] = diff;
+      const color = op === -1 ? 'red' : op === 1 ? 'green' : 'black';
+      return `<span style="color: ${color};">${text}</span>`;
+    })
+    .join('');
+
+  // Show the diff in a webview panel
+  const panel = vscode.window.createWebviewPanel(
+    'diffView',
+    'Compare Files',
+    vscode.ViewColumn.One,
+    { enableScripts: true }
+  );
+
+  // HTML Content for the panel
+  panel.webview.html = getWebviewContent(diffContent, oldFilePath, newContent);
+
+  // Handle messages from the webview
+  panel.webview.onDidReceiveMessage(async (message) => {
+    switch (message.command) {
+      case 'replace':
+        await vscode.workspace.fs.writeFile(vscode.Uri.file(oldFilePath), Buffer.from(message.newContent));
+        vscode.window.showInformationMessage('Replaced successfully!');
+        break;
+      case 'append':
+        const updatedContent = oldContent + '\n' + message.newContent;
+        await vscode.workspace.fs.writeFile(vscode.Uri.file(oldFilePath), Buffer.from(updatedContent));
+        vscode.window.showInformationMessage('Appended successfully!');
+        break;
+    }
+  });
+}
+
+// Function to get HTML content for the webview panel
+function getWebviewContent(diffContent, oldFilePath, newContent) {
+  return `
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>Compare Files</title>
+      <style>
+        .diff-container { font-family: monospace; white-space: pre-wrap; }
+        .button { margin: 5px; padding: 5px 10px; cursor: pointer; }
+        .replace-btn { background-color: #f44336; color: white; }
+        .append-btn { background-color: #4CAF50; color: white; }
+      </style>
+    </head>
+    <body>
+      <div class="diff-container">${diffContent}</div>
+      <button class="button replace-btn" onclick="replaceChanges()">Replace</button>
+      <button class="button append-btn" onclick="appendChanges()">Append</button>
+      <script>
+        const vscode = acquireVsCodeApi();
+
+        function replaceChanges() {
+          vscode.postMessage({ command: 'replace', newContent: ${JSON.stringify(newContent)} });
+        }
+
+        function appendChanges() {
+          vscode.postMessage({ command: 'append', newContent: ${JSON.stringify(newContent)} });
+        }
+      </script>
+    </body>
+    </html>
+  `;
+}
+
+// Deactivate the extension
+function deactivate() {}
+
+module.exports = {
+  activate,
+  deactivate
+};
+
+
+
+============================================================================================================================
+
+
+
+
+
+// extension.js
+const vscode = require('vscode');
+const DiffMatchPatch = require('diff-match-patch');
+
+// Activate the extension
+function activate(context) {
+  let disposable = vscode.commands.registerCommand('extension.compareFiles', async () => {
+    // Prompt the user to select two files for comparison
+    const oldFileUri = await vscode.window.showOpenDialog({ canSelectMany: false });
+    const newFileUri = await vscode.window.showOpenDialog({ canSelectMany: false });
+
+    if (!oldFileUri || !newFileUri) {
+      vscode.window.showErrorMessage('Please select both old and new files.');
+      return;
+    }
+
+    const oldFile = oldFileUri[0];
+    const newFile = newFileUri[0];
+
+    // Read file content
+    const oldContent = (await vscode.workspace.fs.readFile(oldFile)).toString();
+    const newContent = (await vscode.workspace.fs.readFile(newFile)).toString();
+
+    // Highlight differences in the old file editor
+    await highlightDifferences(oldContent, newContent, oldFile);
+  });
+
+  context.subscriptions.push(disposable);
+}
+
+// Function to highlight differences and add CodeLens actions
+async function highlightDifferences(oldContent, newContent, oldFileUri) {
+  const dmp = new DiffMatchPatch();
+  const diffs = dmp.diff_main(oldContent, newContent);
+  dmp.diff_cleanupSemantic(diffs);
+
+  // Open the old file in an editor
+  const document = await vscode.workspace.openTextDocument(oldFileUri);
+  const editor = await vscode.window.showTextDocument(document);
+
+  // Create a decoration type for differences
+  const replaceDecoration = vscode.window.createTextEditorDecorationType({
+    backgroundColor: 'rgba(255,0,0,0.3)',
+    border: '1px solid red'
+  });
+
+  const appendDecoration = vscode.window.createTextEditorDecorationType({
+    backgroundColor: 'rgba(0,255,0,0.3)',
+    border: '1px solid green'
+  });
+
+  const replaceRanges = [];
+  const appendRanges = [];
+
+  let position = 0;
+
+  // Identify ranges for differences and add CodeLens actions
+  diffs.forEach((diff) => {
+    const [op, text] = diff;
+    const range = new vscode.Range(
+      document.positionAt(position),
+      document.positionAt(position + text.length)
+    );
+
+    if (op === -1) {
+      replaceRanges.push(range);
+      addCodeLens(editor, range, text, 'Replace', oldFileUri, newContent);
+    } else if (op === 1) {
+      appendRanges.push(range);
+      addCodeLens(editor, range, text, 'Append', oldFileUri, newContent);
+    }
+
+    position += text.length;
+  });
+
+  editor.setDecorations(replaceDecoration, replaceRanges);
+  editor.setDecorations(appendDecoration, appendRanges);
+}
+
+// Function to add CodeLens for Replace and Append actions
+function addCodeLens(editor, range, diffText, actionType, oldFileUri, newContent) {
+  const command = {
+    title: actionType,
+    tooltip: `Click to ${actionType.toLowerCase()} changes.`,
+    command: actionType === 'Replace' ? 'extension.replaceDiff' : 'extension.appendDiff',
+    arguments: [editor, range, oldFileUri, newContent]
+  };
+
+  editor.setDecorations(vscode.window.createTextEditorDecorationType({}), [
+    { range, renderOptions: { after: { contentText: ` [${actionType}]`, color: 'blue', cursor: 'pointer' } } }
+  ]);
+
+  vscode.commands.registerCommand(command.command, (editor, range, oldFileUri, newContent) => {
+    handleDiffAction(editor, range, oldFileUri, newContent, actionType);
+  });
+}
+
+// Handle Replace and Append actions
+async function handleDiffAction(editor, range, oldFileUri, newContent, actionType) {
+  const oldContent = editor.document.getText();
+  const start = editor.document.offsetAt(range.start);
+  const end = editor.document.offsetAt(range.end);
+
+  let modifiedContent;
+
+  if (actionType === 'Replace') {
+    modifiedContent = oldContent.substring(0, start) + newContent + oldContent.substring(end);
+  } else if (actionType === 'Append') {
+    modifiedContent = oldContent.substring(0, end) + newContent + oldContent.substring(end);
+  }
+
+  // Apply changes to the old file
+  const workspaceEdit = new vscode.WorkspaceEdit();
+  workspaceEdit.replace(oldFileUri, new vscode.Range(range.start, range.end), newContent);
+
+  await vscode.workspace.applyEdit(workspaceEdit);
+  vscode.window.showInformationMessage(`${actionType} operation was successful!`);
+}
+
+// Deactivate the extension
+function deactivate() {}
+
+module.exports = {
+  activate,
+  deactivate
+};
+
+
+
+
